@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Счёт №{{number}}</title>
+    <style>
+        .doc-title { text-align: center; margin-bottom: 4pt; }
+        .doc-subtitle { text-align: center; color: #555; margin-bottom: 14pt; }
+        .sum { margin-top: 12pt; }
+    </style>
+</head>
+<body>
+    <h1 class="doc-title">Счёт на оплату</h1>
+    <p class="doc-subtitle">Номер счёта: {{number}}</p>
+
+    <table>
+        <tr>
+            <th>Плательщик</th>
+            <td>{{client}}</td>
+        </tr>
+        <tr>
+            <th>Дата выставления</th>
+            <td>{{date}}</td>
+        </tr>
+        <tr>
+            <th>Срок оплаты</th>
+            <td>{{due_date}}</td>
+        </tr>
+    </table>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Позиция</th>
+                <th>Описание</th>
+                <th>Кол-во</th>
+                <th>Цена</th>
+                <th>Сумма</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>{{number}}</td>
+                <td>{{description}}</td>
+                <td>{{quantity}}</td>
+                <td>{{price}}</td>
+                <td>{{amount}}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p class="total right sum">К оплате: {{amount}} ₽</p>
+    <p>Банковские реквизиты: {{bank}}</p>
+    <p>Комментарий: {{comment}}</p>
+</body>
+</html>

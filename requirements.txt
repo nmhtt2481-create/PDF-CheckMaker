@@ -1,0 +1,15 @@
+# Зависимости генератора чеков.
+# Всё остальное (csv, pathlib, re, html, subprocess и т.д.) — стандартная
+# библиотека Python, отдельно устанавливать не нужно.
+#
+# Установка:
+#     pip install -r requirements.txt
+#
+# Нужен только для создания PDF. Создание HTML работает вообще без установки.
+
+# Основной движок PDF (--pdf-engine weasyprint, по умолчанию).
+# На macOS достаточно `pip install`. На Windows нужны ещё нативные библиотеки
+# GTK/Pango — https://weasyprint.org/documentation/installation/
+# Если их установить нельзя, PDF создаётся через браузер:
+#     python receipt_generator.py --pdf-engine auto
+weasyprint>=60

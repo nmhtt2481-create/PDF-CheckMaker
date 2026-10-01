@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Чек №{{id}}</title>
+    <style>
+        .doc-title { text-align: center; margin-bottom: 4pt; }
+        .doc-subtitle { text-align: center; color: #555; margin-bottom: 14pt; }
+        .meta td:first-child { width: 120px; }
+        .sum { margin-top: 12pt; }
+    </style>
+</head>
+<body>
+    <h1 class="doc-title">Товарный чек</h1>
+    <p class="doc-subtitle">Номер документа: {{id}}</p>
+
+    <table class="meta">
+        <tr>
+            <th>Клиент</th>
+            <td>{{name}}</td>
+        </tr>
+        <tr>
+            <th>Дата</th>
+            <td>{{date}}</td>
+        </tr>
+        <tr>
+            <th>Способ оплаты</th>
+            <td>{{payment_method}}</td>
+        </tr>
+    </table>
+
+    <table class="items">
+        <thead>
+            <tr>
+                <th>№</th>
+                <th>Товар</th>
+                <th>Количество</th>
+                <th>Цена</th>
+                <th>Сумма</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>{{id}}</td>
+                <td>{{product}}</td>
+                <td>{{quantity}}</td>
+                <td>{{price}}</td>
+                <td>{{total}}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p class="total sum right">Итого к оплате: {{total}} ₽</p>
+    <p class="right">Спасибо за покупку!</p>
+</body>
+</html>
