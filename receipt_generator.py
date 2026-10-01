@@ -31,6 +31,11 @@ from typing import Dict, List, Optional, Sequence, Tuple
 APP_TITLE = "ГЕНЕРАТОР ЧЕКОВ"
 LINE = "=" * 32
 
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_CONTRADICTION = 2
+EXIT_INTERRUPTED = 130
+
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SEARCH_DIRS: List[Path] = [
     BASE_DIR / "templates",
@@ -39,6 +44,9 @@ DEFAULT_SEARCH_DIRS: List[Path] = [
 ]
 DEFAULT_OUTPUT_DIR = BASE_DIR / "output"
 DEFAULT_FONTS_DIR = BASE_DIR / "fonts"
+DEMO_DIR = BASE_DIR / "demo"
+DEMO_TEMPLATE = DEMO_DIR / "demo_receipt.html"
+DEMO_CSV = DEMO_DIR / "demo_orders.csv"
 
 HTML_SUFFIXES = {".html", ".htm"}
 CSV_SUFFIXES = {".csv"}
@@ -543,25 +551,49 @@ def format_consistency_issues(
     return "\n".join(lines)
 
 
+def confirm_contradiction(
+    issues: Sequence[Dict[str, object]],
+    label: str,
+    allow: bool,
+) -> bool:
+    """Показывает расхождение и требует явного решения.
+
+    Нажатие Enter расхождение не пропускает: чтобы выпустить документ
+    с заведомо противоречивыми данными, нужно выбрать пункт явно.
+    """
+    print(format_consistency_issues(issues, label))
+    if allow:
+        print("[!] Противоречие пропущено: разрешено ключом --allow-contradictions.")
+        return True
+
+    print()
+    print("  1. Прервать, данные требуют исправления")
+    print("  2. Создать документ несмотря на противоречие")
+    print()
+    answer = prompt("Выберите пункт: ", {"1", "2"})
+    return answer == "2"
+
+
 def confirm_single_generation(
     headers: Sequence[str],
     record: Dict[str, str],
     label: str,
+    allow_contradictions: bool = False,
 ) -> bool:
     """Спрашивает подтверждение, если в записи есть противоречие о сроке."""
     issues = validate_record(headers, record)
     if not issues:
         return True
     print()
-    print(format_consistency_issues(issues, label))
-    return prompt_yes_no("Создать документ с такими данными?", default=False)
+    return confirm_contradiction(issues, label, allow_contradictions)
 
 
 def confirm_batch_generation(
     headers: Sequence[str],
     records: Sequence[Dict[str, str]],
+    allow_contradictions: bool = False,
 ) -> bool:
-    """Проверяет все записи разом и спрашивает подтверждение один раз."""
+    """Проверяет все записи разом и спрашивает решение один раз на весь файл."""
     problems: List[Tuple[str, List[Dict[str, object]]]] = []
     for position, record in enumerate(records, start=1):
         issues = validate_record(headers, record)
@@ -580,10 +612,15 @@ def confirm_batch_generation(
         print(f"    ... и ещё {len(problems) - 20} записей с расхождениями.")
         print()
 
-    return prompt_yes_no(
-        f"Создать документы для всех записей, несмотря на расхождения ({len(records)} шт.)?",
-        default=False,
-    )
+    if allow_contradictions:
+        print("[!] Противоречия пропущены: разрешены ключом --allow-contradictions.")
+        return True
+
+    print("  1. Прервать, данные требуют исправления")
+    print(f"  2. Создать документы для всех {len(records)} записей несмотря на расхождения")
+    print()
+    answer = prompt("Выберите пункт: ", {"1", "2"})
+    return answer == "2"
 
 
 def format_record_identity(
@@ -1129,6 +1166,43 @@ def ask_output_format() -> str:
     return {"1": "both", "2": "html", "3": "pdf"}[answer]
 
 
+def write_document(
+    rendered: str,
+    stem: str,
+    output_dir: Path,
+    output_format: str,
+    pdf_engine: str,
+    quiet: bool = False,
+) -> Tuple[Optional[Path], Optional[Path]]:
+    """Пишет готовый HTML и/или конвертирует его в PDF."""
+    html_path: Optional[Path] = None
+    if output_format in ("html", "both"):
+        html_path = save_html(rendered, output_dir, f"{stem}.html")
+        if not quiet:
+            print(f"[+] HTML создан: {html_path}")
+
+    pdf_path: Optional[Path] = None
+    if output_format in ("pdf", "both"):
+        source = html_path
+        if source is None:
+            source = save_html(rendered, output_dir, f"{stem}.html")
+            if not quiet:
+                print(f"[+] Временный HTML создан: {source}")
+        pdf_path = create_pdf(source, output_dir / f"{stem}.pdf", engine=pdf_engine)
+        if not quiet:
+            print(f"[+] PDF создан:  {pdf_path}")
+        if output_format == "pdf":
+            try:
+                source.unlink()
+                if not quiet:
+                    print("[i] Временный HTML удалён.")
+            except OSError:
+                pass
+            html_path = None
+
+    return html_path, pdf_path
+
+
 def generate_single(
     template_text: str,
     headers: Sequence[str],
@@ -1148,26 +1222,9 @@ def generate_single(
     report_template_issues(missing, headers)
     report_unused_columns(used, headers)
 
-    html_path: Optional[Path] = None
-    if output_format in ("html", "both"):
-        html_path = save_html(rendered, output_dir, f"{stem}.html")
-        print(f"[+] HTML создан: {html_path}")
-
-    pdf_path: Optional[Path] = None
-    if output_format in ("pdf", "both"):
-        source = html_path
-        if source is None:
-            source = save_html(rendered, output_dir, f"{stem}.html")
-            print(f"[+] Временный HTML создан: {source}")
-        pdf_path = create_pdf(source, output_dir / f"{stem}.pdf", engine=pdf_engine)
-        print(f"[+] PDF создан:  {pdf_path}")
-        if output_format == "pdf":
-            try:
-                source.unlink()
-                print("[i] Временный HTML удалён.")
-            except OSError:
-                pass
-            html_path = None
+    html_path, pdf_path = write_document(
+        rendered, stem, output_dir, output_format, pdf_engine
+    )
 
     if pdf_path is not None and open_after:
         if prompt_yes_no("Открыть PDF в системной программе просмотра?"):
@@ -1200,25 +1257,11 @@ def generate_all(
         unknown_columns.update(missing)
         used_columns.update(used)
 
-        html_path: Optional[Path] = None
-        if output_format in ("html", "both"):
-            html_path = save_html(rendered, output_dir, f"{stem}.html")
-
-        pdf_path: Optional[Path] = None
-        if output_format in ("pdf", "both"):
-            source = html_path or save_html(rendered, output_dir, f"{stem}.html")
-            pdf_path = create_pdf(source, output_dir / f"{stem}.pdf", engine=pdf_engine)
-
+        html_path, pdf_path = write_document(
+            rendered, stem, output_dir, output_format, pdf_engine, quiet=True
+        )
         label = pdf_path.name if pdf_path is not None else (html_path.name if html_path else stem)
         print(f"[{position}/{len(records)}] {label}")
-
-        if html_path is not None and output_format == "pdf":
-            try:
-                html_path.unlink()
-            except OSError:
-                pass
-            html_path = None
-
         results.append((html_path, pdf_path))
 
     if unknown_columns:
@@ -1228,6 +1271,273 @@ def generate_all(
     report_unused_columns(sorted(used_columns), headers)
 
     return results
+
+
+def normalize_path_text(value: str) -> str:
+    """Приводит путь к сравнимому виду: слэши в одну сторону, без регистра."""
+    return str(value).replace("\\", "/").strip().lower()
+
+
+def resolve_file(pattern: str, files: Sequence[Path], suffixes: set, label: str) -> Path:
+    """Находит файл по полному пути, имени, имени без расширения или части имени."""
+    needle = normalize_path_text(pattern)
+    if not needle:
+        raise UserError(f"Не указан {label.lower()}.")
+
+    if not files:
+        raise UserError(f"{label} не найден: в папках поиска нет подходящих файлов.")
+
+    for candidate in files:
+        if normalize_path_text(str(candidate)) == needle:
+            return candidate
+        if normalize_path_text(display_path(candidate)) == needle:
+            return candidate
+
+    stages: List[List[Path]] = [
+        [item for item in files if item.name.lower() == needle],
+        [item for item in files if any(
+            item.name.lower() == f"{needle}{ext}" for ext in sorted(suffixes)
+        )],
+        [item for item in files if item.stem.lower() == needle],
+        [item for item in files if needle in item.name.lower()],
+        [item for item in files if needle in normalize_path_text(display_path(item))],
+    ]
+
+    for matches in stages:
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            listing = "\n".join(f"      - {display_path(item)}" for item in matches[:20])
+            raise UserError(
+                f"Под запрос «{pattern}» подходит несколько файлов:\n{listing}\n"
+                "    Уточните запрос, указав имя файла целиком или путь."
+            )
+
+    similar = [
+        display_path(item) for item in files
+        if needle[:4] and needle[:4] in normalize_path_text(display_path(item))
+    ]
+    hint = f"\n    Похожие: {', '.join(similar[:5])}" if similar else ""
+    raise UserError(f"{label} «{pattern}» не найден.{hint}")
+
+
+def select_records_by_spec(
+    headers: Sequence[str],
+    records: Sequence[Dict[str, str]],
+    spec: str,
+) -> List[Tuple[int, Dict[str, str]]]:
+    """Выбирает записи по идентификаторам или номерам строк (через запятую)."""
+    wanted = [item.strip() for item in str(spec).split(",")]
+    wanted = [item for item in wanted if item]
+    if not wanted:
+        raise UserError(
+            "Не указаны записи. Используйте --row <идентификатор> или --all."
+        )
+
+    id_header = None
+    for header in headers:
+        if header.strip().lower() in PREFERRED_ID_FIELDS:
+            if any((record.get(header) or "").strip() for record in records):
+                id_header = header
+                break
+
+    by_id: Dict[str, int] = {}
+    if id_header:
+        for position, record in enumerate(records, start=1):
+            value = (record.get(id_header) or "").strip().lower()
+            if value:
+                by_id.setdefault(value, position)
+
+    selected: List[Tuple[int, Dict[str, str]]] = []
+    taken: set = set()
+    unknown: List[str] = []
+
+    for item in wanted:
+        key = item.lower()
+        position = by_id.get(key)
+        if position is None and key.isdigit() and 1 <= int(key) <= len(records):
+            position = int(key)
+        if position is None:
+            unknown.append(item)
+            continue
+        if position in taken:
+            continue
+        taken.add(position)
+        selected.append((position, records[position - 1]))
+
+    if unknown:
+        available = ", ".join(sorted(by_id)[:15]) if by_id else "нет"
+        raise UserError(
+            f"Записи не найдены: {', '.join(unknown)}.\n"
+            f"    Доступные значения «{id_header or 'id'}»: {available}\n"
+            "    Также можно указать номер строки по порядку в файле."
+        )
+
+    return selected
+
+
+def run_demo(
+    output_dir: Path,
+    base_css: str,
+    output_format: str,
+    pdf_engine: str,
+    open_after: bool = True,
+) -> int:
+    """Демонстрационный режим: одна команда — готовые документы в output/.
+
+    Не задаёт вопросов и не требует настройки: использует файлы из demo/.
+    """
+    if not DEMO_TEMPLATE.is_file():
+        raise UserError(f"Демо-шаблон не найден: {DEMO_TEMPLATE}")
+    if not DEMO_CSV.is_file():
+        raise UserError(f"Демо-данные не найдены: {DEMO_CSV}")
+
+    template_text = load_template(DEMO_TEMPLATE)
+    headers, records = read_csv(DEMO_CSV)
+    base_name = "demo_receipt"
+
+    print()
+    print("Демонстрационный запуск: чек для каждой строки demo/demo_orders.csv.")
+    print(f"Движок PDF: {pdf_engine}. Если PDF не создастся, ниже останется готовый HTML.")
+    print()
+
+    created: List[Path] = []
+    for position, record in enumerate(records, start=1):
+        identifier = build_record_identifier(headers, record, position)
+        stem = sanitize_filename(f"{base_name}_{identifier}", fallback=f"document_{position:03d}")
+        rendered, missing, _used = render_template(template_text, record, base_css)
+        if missing:
+            listed = ", ".join(sorted(missing))
+            print(f"[!] {stem}: нет данных для {listed}")
+        try:
+            html_path, pdf_path = write_document(
+                rendered, stem, output_dir, output_format, pdf_engine, quiet=True
+            )
+        except UserError as exc:
+            print(f"[!] {stem}: {exc}")
+            continue
+        result = pdf_path or html_path
+        if result is not None:
+            created.append(result)
+            print(f"[+] {result}")
+
+    print()
+    print("---")
+    print(f"Готово документов: {len(created)} из {len(records)}")
+
+    if not created:
+        print("[!] Не удалось создать ни одного документа.")
+        return EXIT_ERROR
+
+    first = created[0]
+    print()
+    print("Попробуйте изменить demo/demo_orders.csv и запустить команду снова.")
+    if open_after and first.suffix.lower() == ".pdf" and not open_pdf(first):
+        print(f"    Откройте файл вручку: {first}")
+    return EXIT_OK
+
+
+def run_automation(
+    args: argparse.Namespace,
+    templates: Sequence[Path],
+    csv_files: Sequence[Path],
+    output_dir: Path,
+    base_css: str,
+    pdf_engine: str,
+) -> int:
+    """Неинтерактивный режим: без меню, с кодом возврата для автоматизации."""
+    if not args.template or not args.csv:
+        raise UserError(
+            "Неинтерактивный режим требует оба ключа: --template и --csv."
+        )
+    if not args.row and not args.all:
+        raise UserError(
+            "Укажите, что обрабатывать: --row <идентификатор> или --all."
+        )
+
+    template_path = resolve_file(args.template, templates, HTML_SUFFIXES, "Шаблон")
+    csv_path = resolve_file(args.csv, csv_files, CSV_SUFFIXES, "CSV-файл")
+    template_text = load_template(template_path)
+    headers, records = read_csv(csv_path)
+    base_name = sanitize_filename(template_path.stem, fallback="document")
+
+    if args.all:
+        targets = list(enumerate(records, start=1))
+    else:
+        targets = select_records_by_spec(headers, records, args.row)
+
+    print(f"Шаблон: {display_path(template_path)}")
+    print(f"Данные:  {display_path(csv_path)}")
+    print(f"Записей: {len(targets)} из {len(records)}, формат: {args.output_format}")
+
+    created: List[Path] = []
+    skipped: List[str] = []
+    failed: List[str] = []
+    unknown_columns: set = set()
+
+    for position, record in targets:
+        label = format_record_identity(headers, record, position)
+        issues = validate_record(headers, record)
+
+        if issues:
+            print()
+            if args.allow_contradictions:
+                print(confirm_contradiction_message(issues, label))
+            else:
+                print(format_consistency_issues(issues, label))
+                skipped.append(label)
+                print(f"[-] Пропущено из-за противоречий: {label}")
+                continue
+
+        identifier = build_record_identifier(headers, record, position)
+        stem = sanitize_filename(
+            f"{base_name}_{identifier}", fallback=f"document_{position:03d}"
+        )
+        rendered, missing, _used = render_template(template_text, record, base_css)
+        unknown_columns.update(missing)
+
+        try:
+            html_path, pdf_path = write_document(
+                rendered, stem, output_dir, args.output_format, pdf_engine, quiet=True
+            )
+        except UserError as exc:
+            print(f"[!] {label}: {exc}")
+            failed.append(label)
+            continue
+
+        result = pdf_path or html_path
+        if result is not None:
+            created.append(result)
+            print(f"[+] {result}")
+
+    if unknown_columns:
+        listed = ", ".join(sorted(f"{{{{{name}}}}}" for name in unknown_columns))
+        print(f"[!] Плейсхолдеры без данных (оставлены как есть): {listed}")
+
+    print("---")
+    print(f"Создано: {len(created)}")
+    if skipped:
+        print(f"Пропущено из-за противоречий: {len(skipped)}")
+    if failed:
+        print(f"Не удалось создать: {len(failed)}")
+
+    if skipped:
+        return EXIT_CONTRADICTION
+    if failed:
+        return EXIT_ERROR
+    if not created:
+        return EXIT_ERROR
+    return EXIT_OK
+
+
+def confirm_contradiction_message(
+    issues: Sequence[Dict[str, object]],
+    label: str,
+) -> str:
+    """Текст предупреждения для автоматического режима."""
+    return format_consistency_issues(issues, label) + (
+        "\n[!] Противоречие пропущено: разрешено ключом --allow-contradictions."
+    )
 
 
 def print_menu(templates: Sequence[Path], csv_files: Sequence[Path]) -> None:
@@ -1306,6 +1616,50 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--template",
+        metavar="ШАБЛОН",
+        help="Имя или путь HTML-шаблона. Вместе с --csv включает неинтерактивный режим.",
+    )
+    parser.add_argument(
+        "--csv",
+        metavar="ФАЙЛ",
+        help="Имя или путь CSV-файла.",
+    )
+    parser.add_argument(
+        "--row",
+        metavar="ID",
+        help=(
+            "Идентификатор(ы) записей через запятую. Поддерживается значение "
+            "колонки id/number или номер строки по порядку."
+        ),
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Обработать все записи выбранного CSV.",
+    )
+    parser.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["both", "html", "pdf"],
+        default="pdf",
+        metavar="ФОРМАТ",
+        help="Что создавать в неинтерактивном режиме: pdf (по умолчанию), html, both.",
+    )
+    parser.add_argument(
+        "--allow-contradictions",
+        action="store_true",
+        help=(
+            "Создавать документы даже при противоречиях в датах. По умолчанию "
+            "такие записи пропускаются, а код возврата равен 2."
+        ),
+    )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Демонстрационный запуск без вопросов: собрать чеки из demo/ в output/.",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Только проверить все CSV на противоречия в датах и ничего не создавать.",
@@ -1369,6 +1723,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     pdf_engine = args.pdf_engine
     auto_open = not args.no_open
 
+    if args.demo:
+        if args.pdf_engine == "weasyprint" and not weasyprint_available():
+            pdf_engine = "auto"
+            print("[i] WeasyPrint не установлен — для демо подключаю резервный движок.")
+        try:
+            demo_css = build_base_css(fonts_dir)
+        except UserError as exc:
+            print(f"[!] {exc}")
+            return EXIT_ERROR
+        return run_demo(output_dir, demo_css, args.output_format, pdf_engine, open_after=auto_open)
+
     print(LINE)
     print(f"{APP_TITLE:>{len(LINE)}}")
     print(LINE)
@@ -1397,6 +1762,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.check:
         return run_consistency_check(csv_files)
 
+    if args.template or args.csv or args.row or args.all:
+        try:
+            return run_automation(args, templates, csv_files, output_dir, base_css, pdf_engine)
+        except UserError as exc:
+            print(f"\n[!] {exc}")
+            return EXIT_ERROR
+
     while True:
         print_menu(templates, csv_files)
         choice = prompt("Выберите пункт меню: ", {"0", "1", "2", "3"})
@@ -1422,7 +1794,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"  Шаблон: {display_path(template_path)}")
                 print(f"  Данные:  {display_path(csv_path)}")
                 if not confirm_single_generation(
-                    headers, record, format_record_identity(headers, record, 1)
+                    headers, record, format_record_identity(headers, record, 1),
+                    args.allow_contradictions,
                 ):
                     print("[*] Создание отменено из-за противоречий в данных.")
                     continue
@@ -1438,7 +1811,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 template_text = load_template(template_path)
                 print()
                 print(f"Будет обработано записей: {len(records)}")
-                if not confirm_batch_generation(headers, records):
+                if not confirm_batch_generation(headers, records, args.allow_contradictions):
                     print("[*] Создание отменено из-за противоречий в данных.")
                     continue
                 output_format = ask_output_format()
@@ -1460,7 +1833,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"\n[!] {exc}")
         except KeyboardInterrupt:
             print("\n[*] Прервано пользователем.")
-            return 130
+            return EXIT_INTERRUPTED
 
 
 if __name__ == "__main__":
@@ -1471,4 +1844,4 @@ if __name__ == "__main__":
         sys.exit(0)
     except KeyboardInterrupt:
         print("\nПрервано пользователем.")
-        sys.exit(130)
+        sys.exit(EXIT_INTERRUPTED)

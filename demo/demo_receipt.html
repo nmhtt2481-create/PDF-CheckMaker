@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Чек №{{id}}</title>
+    <style>
+        /* Шапка документа */
+        .head { border: none; margin-bottom: 16pt; }
+        .head td { border: none; background: none; text-align: left; padding: 0; }
+        .head td.right { text-align: right; }
+        .brand { font-size: 15pt; font-weight: 700; letter-spacing: 0.4pt; }
+        .brand-sub { color: #666; font-size: 9pt; font-weight: 400; letter-spacing: 0; }
+        .doc-title { font-size: 20pt; font-weight: 700; margin: 0; }
+        .doc-sub { color: #555; margin: 2pt 0 0; }
+
+        /* Таблица «ключ — значение» */
+        .kv th { width: 32%; border: none; background: none; text-align: left; }
+        .kv td { border: none; background: none; }
+
+        /* Таблица позиций */
+        .items th, .items td { border: 1px solid #cccccc; }
+        .items th { background: #f0f0f0; }
+        .items .num { white-space: nowrap; }
+
+        .total { font-size: 13pt; font-weight: 700; text-align: right; margin-top: 14pt; }
+
+        .sign { width: 260px; border: none; margin-top: 26pt; }
+        .sign td { border: none; background: none; }
+        .sign .line { border-bottom: 1px solid #333; height: 30pt; }
+
+        .foot { font-size: 9pt; color: #666; text-align: left; margin-top: 26pt;
+                padding-top: 8pt; border-top: 1px solid #dddddd; }
+    </style>
+</head>
+<body>
+    <table class="head">
+        <tr>
+            <td>
+                <p class="brand">PDF-CHECKMAKER</p>
+                <p class="brand-sub">демонстрационный шаблон</p>
+            </td>
+            <td class="right">
+                <p class="doc-title">Товарный чек</p>
+                <p class="doc-sub">№ {{id}} от {{date}}</p>
+            </td>
+        </tr>
+    </table>
+
+    <table class="kv">
+        <tr>
+            <th>Клиент</th>
+            <td>{{name}}</td>
+        </tr>
+        <tr>
+            <th>E-mail</th>
+            <td>{{email}}</td>
+        </tr>
+        <tr>
+            <th>Дата операции</th>
+            <td>{{date}}</td>
+        </tr>
+        <tr>
+            <th>Способ оплаты</th>
+            <td>{{payment_method}}</td>
+        </tr>
+    </table>
+
+    <table class="items">
+        <thead>
+            <tr>
+                <th style="width: 34px;">№</th>
+                <th>Услуга</th>
+                <th style="width: 78px;">Кол-во</th>
+                <th style="width: 96px;">Цена</th>
+                <th style="width: 106px;">Сумма</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td class="num">{{id}}</td>
+                <td>{{product}}</td>
+                <td class="num">{{quantity}}</td>
+                <td class="num">{{price}} ₽</td>
+                <td class="num">{{total}} ₽</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p class="total">Итого: {{total}} ₽</p>
+
+    <table class="sign">
+        <tr>
+            <td class="line"></td>
+        </tr>
+        <tr>
+            <td class="brand-sub">подпись клиента</td>
+        </tr>
+    </table>
+
+    <p class="foot">
+        Демонстрационный документ. Все данные вымышленные, адрес test@example.com не существует.
+        Сгенерировано скриптом PDF-CheckMaker.
+    </p>
+</body>
+</html>
